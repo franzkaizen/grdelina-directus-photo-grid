@@ -77,15 +77,30 @@
 		</template>
 
 		<v-drawer :model-value="showPicker" title="Add existing photos" icon="add" @cancel="showPicker = false">
-			<template #actions>
-				<v-button icon rounded @click="showPicker = false"><v-icon name="close" /></v-button>
-			</template>
 			<div class="picker">
 				<v-input v-model="pickerSearch" placeholder="Search filename…" class="picker-search">
 					<template #prepend><v-icon name="search" /></template>
 				</v-input>
+
+				<div v-if="!pickerSearch" class="breadcrumb">
+					<button type="button" @click="goToFolder(null)">Root</button>
+					<template v-for="crumb in folderPath" :key="crumb.id">
+						<v-icon name="chevron_right" small />
+						<button type="button" @click="goToFolder(crumb.id)">{{ crumb.name }}</button>
+					</template>
+				</div>
+
 				<div v-if="pickerLoading" class="loading"><v-progress-circular indeterminate /></div>
 				<div v-else class="grid large picker-grid">
+					<div
+						v-for="folder in pickerFolders"
+						:key="'folder-' + folder.id"
+						class="card picker-card folder-card"
+						@click="goToFolder(folder.id, folder.name)"
+					>
+						<v-icon name="folder" x-large />
+						<span class="folder-name">{{ folder.name }}</span>
+					</div>
 					<div
 						v-for="file in pickerResults"
 						:key="file.id"
@@ -280,15 +295,57 @@ const pickerResults = ref([]);
 const pickerLoading = ref(false);
 const pickerPage = ref(1);
 const pickerHasMore = ref(true);
+const currentFolder = ref(null);
+const folderPath = ref([]);
+const pickerFolders = ref([]);
+
+async function fetchFolders() {
+	try {
+		const res = await api.get('/folders', {
+			params: {
+				filter: JSON.stringify(
+					currentFolder.value ? { parent: { _eq: currentFolder.value } } : { parent: { _null: true } },
+				),
+				fields: 'id,name',
+				sort: 'name',
+				limit: -1,
+			},
+		});
+		pickerFolders.value = res.data.data || [];
+	} catch (err) {
+		pickerFolders.value = [];
+	}
+}
+
+function goToFolder(id, name) {
+	if (id === null) {
+		folderPath.value = [];
+	} else {
+		const existingIndex = folderPath.value.findIndex((c) => c.id === id);
+		if (existingIndex !== -1) {
+			folderPath.value = folderPath.value.slice(0, existingIndex + 1);
+		} else {
+			folderPath.value = [...folderPath.value, { id, name }];
+		}
+	}
+	currentFolder.value = id;
+	runPickerSearch();
+}
 
 async function runPickerSearch() {
 	pickerPage.value = 1;
 	pickerResults.value = [];
 	pickerHasMore.value = true;
+	pickerFolders.value = [];
+	if (!pickerSearch.value) await fetchFolders();
 	await loadMorePicker();
 }
 watch(showPicker, (open) => {
-	if (open) runPickerSearch();
+	if (open) {
+		currentFolder.value = null;
+		folderPath.value = [];
+		runPickerSearch();
+	}
 });
 let searchDebounce;
 watch(pickerSearch, () => {
@@ -303,7 +360,9 @@ async function loadMorePicker() {
 			params: {
 				filter: JSON.stringify({
 					type: { _starts_with: 'image/' },
-					...(pickerSearch.value ? { filename_download: { _icontains: pickerSearch.value } } : {}),
+					...(pickerSearch.value
+						? { filename_download: { _icontains: pickerSearch.value } }
+						: { folder: currentFolder.value ? { _eq: currentFolder.value } : { _null: true } }),
 				}),
 				fields: FILE_FIELDS,
 				sort: '-uploaded_on',
@@ -462,8 +521,48 @@ function stepLightbox(delta) {
 .picker-search {
 	max-width: 320px;
 }
+.breadcrumb {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+.breadcrumb button {
+	font-size: 14px;
+	color: var(--theme--foreground-subdued);
+	padding: 2px 4px;
+}
+.breadcrumb button:last-child {
+	color: var(--theme--foreground);
+	font-weight: 600;
+}
+.breadcrumb button:hover {
+	color: var(--theme--primary);
+}
 .picker-card {
 	cursor: pointer;
+}
+.folder-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	background: var(--theme--background-subdued);
+	color: var(--theme--foreground-subdued);
+}
+.folder-card:hover {
+	background: var(--theme--background-normal);
+	color: var(--theme--primary);
+}
+.folder-name {
+	font-size: 13px;
+	text-align: center;
+	padding: 0 8px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
 }
 .picker-card.added {
 	opacity: 0.4;
