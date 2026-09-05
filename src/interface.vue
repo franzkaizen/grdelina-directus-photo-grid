@@ -44,15 +44,15 @@
 
 			<div v-if="loading" class="loading"><v-progress-circular indeterminate /></div>
 
-			<div v-else-if="items.length === 0" class="empty">
+			<div v-else-if="displayItems.length === 0" class="empty">
 				<v-icon name="image" large />
 				<p>No photos yet</p>
 			</div>
 
 			<div v-else class="grid" :class="size">
 				<div
-					v-for="(item, index) in items"
-					:key="item.id"
+					v-for="(item, index) in displayItems"
+					:key="item.key"
 					class="card"
 					draggable="true"
 					@dragstart="onDragStart(index, $event)"
@@ -128,7 +128,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useApi, useStores } from '@directus/extensions-sdk';
 
 const props = defineProps({
-	value: { type: Array, default: null },
+	value: { type: [Object, Array], default: null },
 	primaryKey: { type: [String, Number], default: null },
 	collection: { type: String, default: null },
 	field: { type: String, default: null },
@@ -139,13 +139,13 @@ const props = defineProps({
 	defaultSize: { type: String, default: 'large' },
 });
 
+const emit = defineEmits(['input']);
+
 const api = useApi();
 const { useNotificationsStore } = useStores();
 const notifications = useNotificationsStore();
 
 const savable = computed(() => props.primaryKey !== null && props.primaryKey !== undefined && props.primaryKey !== '+');
-const limitNum = computed(() => (props.limit ? Number(props.limit) : null));
-const limitReached = computed(() => limitNum.value !== null && items.value.length >= limitNum.value);
 
 const storageKey = `grdelina-photo-grid-size-${props.collection}-${props.field}`;
 const size = ref(localStorage.getItem(storageKey) || props.defaultSize || 'large');
@@ -158,22 +158,72 @@ function setSize(next) {
 	}
 }
 
-const items = ref([]);
-const loading = ref(false);
-
-// Deliberately no `emit('input', ...)` anywhere in this file. Every change here
-// (add/remove/reorder) is already written straight to the junction via the API
-// the moment it happens — see the module docblock. Emitting a value back to
-// Directus's own save cycle sounds harmless but isn't: Directus's core treats
-// that as "this field changed" and tries to persist it as an alias/M2M value on
-// Save, using its own relational-diff format — a plain array of file ids isn't
-// that format, and it fails by (mis)reading a file's uuid as this junction's own
-// integer id. Symptom if this regresses: every open item prompts to save with
-// zero real edits, and Save then throws "invalid input syntax for type integer".
-
 const FILE_FIELDS = 'id,filename_download,type,width,height,modified_on';
 
-async function fetchItems() {
+// ---- Staged editing --------------------------------------------------------
+// Normal Directus behaviour: nothing touches the junction until the parent
+// item's own Save button is clicked, and everything here is discardable by
+// navigating away instead, same as every other field. We keep local
+// create/update/delete lists and hand them to Directus as its own documented
+// nested-relational payload shape ({ create, update, delete }) via
+// emit('input', ...) -- Directus's own save logic applies that against the
+// junction when the parent item is saved. New file *uploads* are the one
+// exception: the binary has to exist as a directus_files row immediately,
+// same as native Directus's own Files field -- only the *link* to this
+// parent is staged, not the upload itself.
+const savedItems = ref([]); // committed junction rows already on the server: {id, sort, file}
+const pendingCreate = ref([]); // [{ _key, file, sort }] -- not yet linked
+const pendingUpdate = ref({}); // { [savedItemId]: newSort }
+const pendingDelete = ref(new Set()); // Set<savedItemId>
+const loading = ref(false);
+
+const displayItems = computed(() => {
+	const kept = savedItems.value
+		.filter((i) => !pendingDelete.value.has(i.id))
+		.map((i) => ({
+			key: `saved-${i.id}`,
+			id: i.id,
+			isNew: false,
+			file: i.file,
+			sort: pendingUpdate.value[i.id] ?? i.sort,
+		}));
+	const created = pendingCreate.value.map((c) => ({
+		key: c._key,
+		id: null,
+		isNew: true,
+		_key: c._key,
+		file: c.file,
+		sort: c.sort,
+	}));
+	return [...kept, ...created].sort((a, b) => a.sort - b.sort);
+});
+
+const limitNum = computed(() => (props.limit ? Number(props.limit) : null));
+const limitReached = computed(() => limitNum.value !== null && displayItems.value.length >= limitNum.value);
+
+function nextSort() {
+	const sorts = displayItems.value.map((i) => i.sort || 0);
+	return sorts.length ? Math.max(...sorts) + 10 : 10;
+}
+
+function emitPending() {
+	const create = pendingCreate.value.map((c) => ({ directus_files_id: c.file.id, sort: c.sort }));
+	const update = Object.entries(pendingUpdate.value).map(([id, sort]) => ({ id: Number(id), sort }));
+	const del = [...pendingDelete.value];
+	if (create.length === 0 && update.length === 0 && del.length === 0) {
+		emit('input', null);
+	} else {
+		emit('input', { create, update, delete: del });
+	}
+}
+
+function resetPending() {
+	pendingCreate.value = [];
+	pendingUpdate.value = {};
+	pendingDelete.value = new Set();
+}
+
+async function fetchSavedItems() {
 	if (!savable.value) return;
 	loading.value = true;
 	try {
@@ -185,7 +235,7 @@ async function fetchItems() {
 				limit: -1,
 			},
 		});
-		items.value = (res.data.data || []).map((row) => ({
+		savedItems.value = (res.data.data || []).map((row) => ({
 			id: row.id,
 			sort: row.sort,
 			file: row.directus_files_id,
@@ -197,8 +247,49 @@ async function fetchItems() {
 	}
 }
 
-onMounted(fetchItems);
-watch(() => props.primaryKey, fetchItems);
+// Recover in-progress edits if this component ever remounts before Save (e.g.
+// switching tabs within the same item form) -- Directus hands back exactly
+// what we last emitted as `value`.
+async function restorePendingFromValue() {
+	const v = props.value;
+	if (!v || typeof v !== 'object' || Array.isArray(v)) return;
+	pendingUpdate.value = {};
+	(v.update || []).forEach((u) => {
+		pendingUpdate.value[u.id] = u.sort;
+	});
+	pendingDelete.value = new Set(v.delete || []);
+	const creates = v.create || [];
+	if (creates.length === 0) {
+		pendingCreate.value = [];
+		return;
+	}
+	try {
+		const ids = creates.map((c) => c.directus_files_id);
+		const res = await api.get('/files', {
+			params: { filter: JSON.stringify({ id: { _in: ids } }), fields: FILE_FIELDS, limit: -1 },
+		});
+		const byId = Object.fromEntries((res.data.data || []).map((f) => [f.id, f]));
+		pendingCreate.value = creates.map((c) => ({
+			_key: `new-${c.directus_files_id}`,
+			file: byId[c.directus_files_id] || { id: c.directus_files_id },
+			sort: c.sort,
+		}));
+	} catch (err) {
+		pendingCreate.value = [];
+	}
+}
+
+onMounted(async () => {
+	await fetchSavedItems();
+	await restorePendingFromValue();
+});
+watch(
+	() => props.primaryKey,
+	async () => {
+		resetPending();
+		await fetchSavedItems();
+	},
+);
 
 function thumbUrl(file, width) {
 	if (!file?.id) return '';
@@ -219,39 +310,34 @@ async function onFilesChosen(e) {
 	e.target.value = '';
 	for (const file of files) {
 		if (limitReached.value) break;
-		await uploadAndLink(file);
+		await uploadAndStage(file);
 	}
 }
-async function uploadAndLink(file) {
+async function uploadAndStage(file) {
 	try {
 		const formData = new FormData();
 		formData.append('file', file);
-		const uploadRes = await api.post('/files', formData);
-		const newFileId = uploadRes.data.data.id;
-		await linkExisting(newFileId);
+		const uploadRes = await api.post('/files', formData, { params: { fields: FILE_FIELDS } });
+		stageCreate(uploadRes.data.data);
 	} catch (err) {
 		notifications.add({ title: `Could not upload ${file.name}`, type: 'error' });
 	}
 }
 
-async function linkExisting(fileId) {
-	const nextSort = items.value.length ? Math.max(...items.value.map((i) => i.sort || 0)) + 10 : 10;
-	await api.post(`/items/${props.junctionCollection}`, {
-		[props.parentField]: props.primaryKey,
-		directus_files_id: fileId,
-		sort: nextSort,
-	});
-	await fetchItems();
+function stageCreate(file) {
+	if (limitReached.value) return;
+	pendingCreate.value = [...pendingCreate.value, { _key: `new-${file.id}-${Date.now()}`, file, sort: nextSort() }];
+	emitPending();
 }
 
-async function removeItem(item) {
+function removeItem(item) {
 	if (props.disabled) return;
-	try {
-		await api.delete(`/items/${props.junctionCollection}/${item.id}`);
-		items.value = items.value.filter((i) => i.id !== item.id);
-	} catch (err) {
-		notifications.add({ title: 'Could not remove photo', type: 'error' });
+	if (item.isNew) {
+		pendingCreate.value = pendingCreate.value.filter((c) => c._key !== item._key);
+	} else {
+		pendingDelete.value = new Set([...pendingDelete.value, item.id]);
 	}
+	emitPending();
 }
 
 const dragIndex = ref(null);
@@ -266,25 +352,26 @@ function onDragEnd() {
 	dragIndex.value = null;
 	overIndex.value = null;
 }
-async function onDrop() {
+function onDrop() {
 	if (dragIndex.value === null || overIndex.value === null || dragIndex.value === overIndex.value) {
 		onDragEnd();
 		return;
 	}
-	const reordered = [...items.value];
+	const reordered = [...displayItems.value];
 	const [moved] = reordered.splice(dragIndex.value, 1);
 	reordered.splice(overIndex.value, 0, moved);
-	items.value = reordered;
 	onDragEnd();
 
-	const updates = reordered.map((item, i) => ({ id: item.id, sort: (i + 1) * 10 }));
-	items.value.forEach((item, i) => (item.sort = updates[i].sort));
-	try {
-		await api.patch(`/items/${props.junctionCollection}`, updates);
-	} catch (err) {
-		notifications.add({ title: 'Could not save new order', type: 'error' });
-		fetchItems();
-	}
+	reordered.forEach((item, i) => {
+		const newSort = (i + 1) * 10;
+		if (item.isNew) {
+			const c = pendingCreate.value.find((c) => c._key === item._key);
+			if (c) c.sort = newSort;
+		} else {
+			pendingUpdate.value = { ...pendingUpdate.value, [item.id]: newSort };
+		}
+	});
+	emitPending();
 }
 
 const showPicker = ref(false);
@@ -378,19 +465,18 @@ async function loadMorePicker() {
 		pickerLoading.value = false;
 	}
 }
+function findDisplayItemByFileId(fileId) {
+	return displayItems.value.find((i) => i.file?.id === fileId);
+}
 function isAlreadyAdded(fileId) {
-	return items.value.some((i) => i.file?.id === fileId);
+	return !!findDisplayItemByFileId(fileId);
 }
-async function addExisting(file) {
-	if (limitReached.value) return;
-	await linkExisting(file.id);
-}
-async function toggleExisting(file) {
-	const existing = items.value.find((i) => i.file?.id === file.id);
+function toggleExisting(file) {
+	const existing = findDisplayItemByFileId(file.id);
 	if (existing) {
-		await removeItem(existing);
+		removeItem(existing);
 	} else {
-		await addExisting(file);
+		stageCreate(file);
 	}
 }
 </script>

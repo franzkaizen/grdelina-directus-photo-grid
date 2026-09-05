@@ -27,28 +27,48 @@ permanent limitation of the built-in interface (not fixable via config).
 
 This interface does **not** use Directus's own internal relational-editing
 machinery (`useRelationMultiple` etc.) — those composables are private to
-Directus's own app bundle and aren't exposed to extensions. Instead, every
-action (add / remove / reorder) writes directly to the field's junction
-collection via the REST API as soon as you do it — there's no pending/staged
-state and no need to click "Save" on the parent item afterwards for the
-photos specifically. That's a deliberate simplification, not an oversight:
-replicating Directus's internal staged-edit diffing correctly, from outside
-the app, is a much larger and more fragile undertaking than this field
-actually needs.
+Directus's own app bundle and aren't exposed to extensions. Instead it
+re-implements the same *contract* Directus's own "Files" interface uses:
+add / remove / reorder only change local component state; nothing touches
+the junction table until the parent item's own **Save** button is clicked,
+and everything is discardable by navigating away instead — exactly like
+every other field. It does this by emitting Directus's own documented
+nested-relational payload shape via `emit('input', ...)`:
 
-Following on from that: this component deliberately never calls `emit('input',
-...)`. It's tempting to emit the current photo list anyway "just so the value
-prop reflects reality", but Directus's core reads that as "this field changed"
-and tries to persist it on Save using its own alias/M2M diff format — a plain
-array of file ids isn't that format, and Directus fails by misreading a file's
-uuid as this junction's own integer id. Symptom if this regresses: every item
-you open prompts to save with zero real edits made, and clicking Save throws
-`invalid input syntax for type integer`.
+```json
+{ "create": [{ "directus_files_id": "...", "sort": 10 }],
+  "update": [{ "id": 7, "sort": 20 }],
+  "delete": [3] }
+```
 
-One consequence: it needs the parent item to already exist (a real primary
-key), since there's nowhere to stage changes for an unsaved item. On a
-brand-new, unsaved item the interface shows a notice asking you to save
-first — save the item once, then add photos.
+Directus's core reads that shape and applies it against the junction
+collection itself when the parent item is saved — this interface never
+writes to `/items/<junction>` directly except to load the *currently saved*
+photos on mount. (An earlier version of this file skipped all of this and
+wrote straight to the API on every action instead, to avoid reimplementing
+Directus's staging contract. That turned out to be the wrong tradeoff: it
+looked like it worked, but it meant photo changes couldn't be discarded by
+navigating away like every other field, and separately, an unrelated attempt
+to satisfy Vue's `value` prop by emitting a bare array of file ids corrupted
+Directus's own Save entirely — it read a file's uuid as if it were the
+junction's own integer row id and threw `invalid input syntax for type
+integer`. Don't reintroduce direct-API-write-on-every-action or a bare-array
+emit; both were tried and both broke in ways that only showed up in real use.)
+
+**New file uploads are the one deliberate exception**: the binary has to
+exist as a real `directus_files` row immediately (same as native Directus's
+own Files field) — only the *link* to this parent record is staged, not the
+upload itself. Cancelling the form afterwards leaves the uploaded file
+sitting unlinked in the media library, which matches Directus's own native
+behaviour in this exact scenario.
+
+One consequence of needing a real junction to load from: this interface
+needs the parent item to already exist (a real primary key), since there's
+nowhere to fetch the current photo list from for an unsaved item. On a
+brand-new, unsaved item it shows a notice asking you to save first — save
+the item once, then add photos. (Staging creates for a *new* item without
+an existing junction to read from would be a reasonable future improvement,
+just not attempted yet.)
 
 ## Setup — per field
 
