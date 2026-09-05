@@ -211,20 +211,10 @@ function emitPending() {
 	const update = Object.entries(pendingUpdate.value).map(([id, sort]) => ({ id: Number(id), sort }));
 	const del = [...pendingDelete.value];
 	if (create.length === 0 && update.length === 0 && del.length === 0) {
-		// Don't emit a bare `null` here. Directus's own form-field wrapper only
-		// clears a field's dirty flag when the emitted value is deep-equal to the
-		// field's real initial value (see emitValue() in Directus's own
-		// form-field.vue) -- our "nothing staged" sentinel never matches that, so
-		// emitting it would mark the field dirty instead of clean. Simplest
-		// correct fix: don't touch the field's edit state when there's nothing
-		// to stage.
-		return;
+		emit('input', null);
+	} else {
+		emit('input', { create, update, delete: del });
 	}
-	emit('input', { create, update, delete: del });
-}
-
-function hasStagedDiff() {
-	return pendingCreate.value.length > 0 || Object.keys(pendingUpdate.value).length > 0 || pendingDelete.value.size > 0;
 }
 
 function resetPending() {
@@ -298,22 +288,6 @@ watch(
 	async () => {
 		resetPending();
 		await fetchSavedItems();
-	},
-);
-// Directus resets a field's edits back to its committed value once the parent
-// item is saved (or the edit is otherwise discarded). If we're still holding a
-// local staged diff at that moment, it just got applied to the server (or
-// thrown away) -- either way it's stale, so drop it and re-pull the real
-// junction rows. Without this, the stale diff can hang around and later get
-// re-emitted, falsely re-marking the field as dirty even though nothing has
-// actually changed since the save.
-watch(
-	() => props.value,
-	async (newVal) => {
-		if (!newVal && hasStagedDiff()) {
-			resetPending();
-			await fetchSavedItems();
-		}
 	},
 );
 
