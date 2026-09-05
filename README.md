@@ -90,6 +90,46 @@ Currently wired up for:
 - `villas.gallery` → `villas_files` / `villas_id`
 - `villas.gallery_featured` → `villas_featured_files` / `villas_id`
 
+## Using this field inside a nested item (e.g. Photo Tour Sections)
+
+`apartment_tour_sections.photos` is edited through a nested drawer, opened
+from the `apartments.tour` list-o2m field. Two things about that drawer
+surprised us in testing and turned out to be normal Directus behaviour, not
+bugs in this extension or something we can change from inside it:
+
+- **The drawer's own checkmark/Save button doesn't write to the server.**
+  It only folds your photo change into the *parent apartment's* own pending
+  edits and closes the drawer — exactly like every other field inside a
+  nested o2m item. The apartment's sidebar Save button turning purple right
+  after you close that drawer is correct: it means there's now a staged
+  change waiting for the apartment's own Save. Nothing is actually persisted
+  until you click that. Skipping it (navigating away, or hard-refreshing the
+  browser) discards the staged photo change — same as it would for any other
+  unsaved field. Directus does warn you before this happens: an in-app
+  "Discard Changes / Keep Editing" dialog on in-app navigation, and the
+  browser's own native "Leave site?" prompt on a hard refresh or tab close —
+  both driven by the same underlying "this item has unsaved edits" flag
+  (`hasEdits` in Directus's `use-item` composable). It's easy to blow past
+  the native browser one without registering it as a warning, since it looks
+  like a plain OS dialog rather than part of the page.
+
+- **Closing that same drawer via Cancel/X/Esc never shows a "Discard
+  Changes?" confirmation**, even with photos changed, and this is true for
+  *every* field in a nested item drawer, not just Photos. We traced this
+  into Directus's own source (`overlay-item.vue`): the confirmation is
+  gated behind a `preventCancelWithEdits` prop that only Directus's own
+  Visual Editor ever sets to `true`. The stock `list-o2m` interface that
+  opens this drawer never does, so Cancel always discards silently by
+  design. There's no way to add that confirmation from inside a field-level
+  interface extension — it lives entirely in Directus core, outside
+  anything this package touches.
+
+**Bottom line:** a photo change made inside a Tour Section's drawer only
+really "sticks" once you (1) confirm it with that drawer's own checkmark,
+*and* (2) click the apartment's own Save. Doing only the first step and
+then navigating away or refreshing will lose it, regardless of what state
+the buttons were in right before you left.
+
 ## Turning it off
 
 Switch the field's Interface back to the built-in "Files" picker at any
