@@ -161,7 +161,7 @@ async function fetchItems() {
 	try {
 		const res = await api.get(`/items/${props.junctionCollection}`, {
 			params: {
-				filter: { [props.parentField]: { _eq: props.primaryKey } },
+				filter: JSON.stringify({ [props.parentField]: { _eq: props.primaryKey } }),
 				fields: ['id', 'sort', `directus_files_id.${FILE_FIELDS.replace(/,/g, ',directus_files_id.')}`].join(','),
 				sort: 'sort',
 				limit: -1,
@@ -189,13 +189,11 @@ watch(() => props.primaryKey, fetchItems);
 
 function thumbUrl(file, width) {
 	if (!file?.id) return '';
-	const base = api.defaults.baseURL.replace(/\/+$/, '');
-	return `${base}/assets/${file.id}?width=${width}&fit=cover&quality=80`;
+	return `/assets/${file.id}?width=${width}`;
 }
 function fullUrl(file) {
 	if (!file?.id) return '';
-	const base = api.defaults.baseURL.replace(/\/+$/, '');
-	return `${base}/assets/${file.id}?width=1600`;
+	return `/assets/${file.id}?width=1600`;
 }
 
 const fileInput = ref(null);
@@ -303,10 +301,10 @@ async function loadMorePicker() {
 	try {
 		const res = await api.get('/files', {
 			params: {
-				filter: {
+				filter: JSON.stringify({
 					type: { _starts_with: 'image/' },
 					...(pickerSearch.value ? { filename_download: { _icontains: pickerSearch.value } } : {}),
-				},
+				}),
 				fields: FILE_FIELDS,
 				sort: '-uploaded_on',
 				limit: 60,
