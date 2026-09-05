@@ -139,8 +139,6 @@ const props = defineProps({
 	defaultSize: { type: String, default: 'large' },
 });
 
-const emit = defineEmits(['input']);
-
 const api = useApi();
 const { useNotificationsStore } = useStores();
 const notifications = useNotificationsStore();
@@ -163,6 +161,16 @@ function setSize(next) {
 const items = ref([]);
 const loading = ref(false);
 
+// Deliberately no `emit('input', ...)` anywhere in this file. Every change here
+// (add/remove/reorder) is already written straight to the junction via the API
+// the moment it happens — see the module docblock. Emitting a value back to
+// Directus's own save cycle sounds harmless but isn't: Directus's core treats
+// that as "this field changed" and tries to persist it as an alias/M2M value on
+// Save, using its own relational-diff format — a plain array of file ids isn't
+// that format, and it fails by (mis)reading a file's uuid as this junction's own
+// integer id. Symptom if this regresses: every open item prompts to save with
+// zero real edits, and Save then throws "invalid input syntax for type integer".
+
 const FILE_FIELDS = 'id,filename_download,type,width,height,modified_on';
 
 async function fetchItems() {
@@ -182,16 +190,11 @@ async function fetchItems() {
 			sort: row.sort,
 			file: row.directus_files_id,
 		}));
-		emitValue();
 	} catch (err) {
 		notifications.add({ title: 'Could not load photos', type: 'error' });
 	} finally {
 		loading.value = false;
 	}
-}
-
-function emitValue() {
-	emit('input', items.value.map((i) => i.file?.id).filter(Boolean));
 }
 
 onMounted(fetchItems);
@@ -246,7 +249,6 @@ async function removeItem(item) {
 	try {
 		await api.delete(`/items/${props.junctionCollection}/${item.id}`);
 		items.value = items.value.filter((i) => i.id !== item.id);
-		emitValue();
 	} catch (err) {
 		notifications.add({ title: 'Could not remove photo', type: 'error' });
 	}

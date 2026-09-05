@@ -36,6 +36,15 @@ replicating Directus's internal staged-edit diffing correctly, from outside
 the app, is a much larger and more fragile undertaking than this field
 actually needs.
 
+Following on from that: this component deliberately never calls `emit('input',
+...)`. It's tempting to emit the current photo list anyway "just so the value
+prop reflects reality", but Directus's core reads that as "this field changed"
+and tries to persist it on Save using its own alias/M2M diff format — a plain
+array of file ids isn't that format, and Directus fails by misreading a file's
+uuid as this junction's own integer id. Symptom if this regresses: every item
+you open prompts to save with zero real edits made, and clicking Save throws
+`invalid input syntax for type integer`.
+
 One consequence: it needs the parent item to already exist (a real primary
 key), since there's nowhere to stage changes for an unsaved item. On a
 brand-new, unsaved item the interface shows a notice asking you to save
