@@ -40,7 +40,7 @@
 				</div>
 			</div>
 
-			<v-notice v-if="limitReached" type="info">Limit reached ({{ limit }} photos max).</v-notice>
+			<v-notice v-if="limitReached" type="info">Limit reached ({{ props.limit }} photos max).</v-notice>
 
 			<div v-if="loading" class="loading"><v-progress-circular indeterminate /></div>
 
@@ -106,10 +106,13 @@
 						:key="file.id"
 						class="card picker-card"
 						:class="{ added: isAlreadyAdded(file.id) }"
-						@click="!isAlreadyAdded(file.id) && addExisting(file)"
+						@click="toggleExisting(file)"
 					>
 						<img :src="thumbUrl(file, 300)" :alt="file.filename_download || ''" loading="lazy" />
-						<span v-if="isAlreadyAdded(file.id)" class="added-badge"><v-icon name="check" small /></span>
+						<span v-if="isAlreadyAdded(file.id)" class="added-badge">
+							<v-icon name="check" small class="icon-check" />
+							<v-icon name="close" small class="icon-remove" />
+						</span>
 					</div>
 				</div>
 				<v-button v-if="pickerHasMore && !pickerLoading" secondary full-width @click="loadMorePicker">
@@ -380,6 +383,14 @@ async function addExisting(file) {
 	if (limitReached.value) return;
 	await linkExisting(file.id);
 }
+async function toggleExisting(file) {
+	const existing = items.value.find((i) => i.file?.id === file.id);
+	if (existing) {
+		await removeItem(existing);
+	} else {
+		await addExisting(file);
+	}
+}
 </script>
 
 <style scoped>
@@ -546,7 +557,9 @@ async function addExisting(file) {
 }
 .picker-card.added {
 	opacity: 0.4;
-	cursor: default;
+}
+.picker-card.added:hover {
+	opacity: 0.7;
 }
 .added-badge {
 	position: absolute;
@@ -556,5 +569,14 @@ async function addExisting(file) {
 	justify-content: center;
 	background: rgb(0 0 0 / 0.35);
 	color: #fff;
+}
+.added-badge .icon-remove {
+	display: none;
+}
+.picker-card.added:hover .icon-check {
+	display: none;
+}
+.picker-card.added:hover .icon-remove {
+	display: block;
 }
 </style>
