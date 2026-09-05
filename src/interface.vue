@@ -70,7 +70,7 @@
 						:src="thumbUrl(item.file, size === 'large' ? 480 : 200)"
 						:alt="item.file?.filename_download || ''"
 						loading="lazy"
-						@click="openLightbox(index)"
+						@click="openFileDetail(item.file)"
 					/>
 				</div>
 			</div>
@@ -117,14 +117,6 @@
 				</v-button>
 			</div>
 		</v-drawer>
-
-		<div v-if="lightboxIndex !== null" class="lightbox" @click.self="closeLightbox">
-			<button type="button" class="lb-close" @click="closeLightbox"><v-icon name="close" /></button>
-			<button type="button" class="lb-prev" @click="stepLightbox(-1)"><v-icon name="chevron_left" /></button>
-			<img class="lb-img" :src="fullUrl(items[lightboxIndex]?.file)" :alt="''" />
-			<button type="button" class="lb-next" @click="stepLightbox(1)"><v-icon name="chevron_right" /></button>
-			<div class="lb-count">{{ lightboxIndex + 1 }} / {{ items.length }}</div>
-		</div>
 	</div>
 </template>
 
@@ -206,9 +198,10 @@ function thumbUrl(file, width) {
 	if (!file?.id) return '';
 	return `/assets/${file.id}?width=${width}`;
 }
-function fullUrl(file) {
-	if (!file?.id) return '';
-	return `/assets/${file.id}?width=1600`;
+
+function openFileDetail(file) {
+	if (!file?.id) return;
+	window.open(`${window.location.origin}/admin/files/${file.id}`, '_blank');
 }
 
 const fileInput = ref(null);
@@ -387,19 +380,6 @@ async function addExisting(file) {
 	if (limitReached.value) return;
 	await linkExisting(file.id);
 }
-
-const lightboxIndex = ref(null);
-function openLightbox(index) {
-	lightboxIndex.value = index;
-}
-function closeLightbox() {
-	lightboxIndex.value = null;
-}
-function stepLightbox(delta) {
-	if (lightboxIndex.value === null) return;
-	const len = items.value.length;
-	lightboxIndex.value = (lightboxIndex.value + delta + len) % len;
-}
 </script>
 
 <style scoped>
@@ -576,58 +556,5 @@ function stepLightbox(delta) {
 	justify-content: center;
 	background: rgb(0 0 0 / 0.35);
 	color: #fff;
-}
-.lightbox {
-	position: fixed;
-	inset: 0;
-	z-index: 999;
-	background: rgb(20 20 20 / 0.94);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-}
-.lb-img {
-	max-width: 92vw;
-	max-height: 92vh;
-	object-fit: contain;
-	border-radius: 6px;
-}
-.lb-close,
-.lb-prev,
-.lb-next {
-	position: absolute;
-	width: 44px;
-	height: 44px;
-	border-radius: 50%;
-	background: rgb(255 255 255 / 0.12);
-	color: #fff;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-}
-.lb-close {
-	top: 20px;
-	right: 20px;
-}
-.lb-prev {
-	left: 20px;
-	top: 50%;
-	transform: translateY(-50%);
-}
-.lb-next {
-	right: 20px;
-	top: 50%;
-	transform: translateY(-50%);
-}
-.lb-count {
-	position: absolute;
-	bottom: 20px;
-	left: 50%;
-	transform: translateX(-50%);
-	color: #fff;
-	background: rgb(255 255 255 / 0.12);
-	padding: 6px 14px;
-	border-radius: 999px;
-	font-size: 13px;
 }
 </style>

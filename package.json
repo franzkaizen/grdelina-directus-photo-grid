@@ -1,6 +1,6 @@
 {
 	"name": "grdelina-directus-photo-grid",
-	"description": "Large-thumbnail photo grid interface for M2M-to-files fields, with a Small/Large size toggle, drag reorder, and click-to-enlarge preview.",
+	"description": "Large-thumbnail photo grid interface for M2M-to-files fields, with a Small/Large size toggle, drag reorder, and click to open a photo's native detail page.",
 	"icon": "grid_view",
 	"version": "1.0.0",
 	"license": "UNLICENSED",

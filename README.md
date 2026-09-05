@@ -13,7 +13,10 @@ permanent limitation of the built-in interface (not fixable via config).
   two-state toggle is what shipped and what's been loved for a decade).
 - Drag and drop to reorder.
 - Hover to reveal a remove button.
-- Click a photo to open a large prev/next preview without leaving the field.
+- Click a photo to open Directus's native file detail page (title,
+  description, alt text, tags, folder) in a new tab — so you get full
+  metadata editing instead of a bare enlarge-only preview, and never lose
+  your place on the current form underneath.
 - The first photo in the list gets a "Hero" badge, since several of our
   fields treat position 0 specially (Hero tiles, each Photo Tour section's
   large hero photo).

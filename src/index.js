@@ -4,7 +4,7 @@ export default {
 	id: 'grdelina-photo-grid',
 	name: 'Photo Grid',
 	icon: 'grid_view',
-	description: 'Large-thumbnail photo grid for M2M-to-files fields, with a Small/Large size toggle, drag reorder, and click-to-enlarge preview.',
+	description: 'Large-thumbnail photo grid for M2M-to-files fields, with a Small/Large size toggle, drag reorder, and click to open a photo\'s native detail page.',
 	component: InterfaceComponent,
 	types: ['alias'],
 	localTypes: ['files'],
