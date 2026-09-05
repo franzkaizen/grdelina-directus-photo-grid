@@ -1,0 +1,33 @@
+{
+	"name": "grdelina-directus-photo-grid",
+	"description": "Large-thumbnail photo grid interface for M2M-to-files fields, with a Small/Large size toggle, drag reorder, and click-to-enlarge preview.",
+	"icon": "grid_view",
+	"version": "1.0.0",
+	"license": "UNLICENSED",
+	"private": true,
+	"keywords": [
+		"directus",
+		"directus-extension",
+		"directus-extension-interface"
+	],
+	"type": "module",
+	"files": [
+		"dist"
+	],
+	"directus:extension": {
+		"type": "interface",
+		"path": "dist/index.js",
+		"source": "src/index.js",
+		"host": "^10.10.0"
+	},
+	"scripts": {
+		"build": "directus-extension build",
+		"dev": "directus-extension build -w --no-minify",
+		"link": "directus-extension link",
+		"validate": "directus-extension validate"
+	},
+	"devDependencies": {
+		"@directus/extensions-sdk": "18.0.4",
+		"vue": "^3.5.42"
+	}
+}
