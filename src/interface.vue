@@ -22,7 +22,7 @@
 						@change="onFilesChosen"
 					/>
 				</div>
-				<div class="size-toggle" role="group" aria-label="Card size">
+				<div v-if="!cols" class="size-toggle" role="group" aria-label="Card size">
 					<button type="button" :class="{ active: size === 'small' }" @click="setSize('small')">
 						<v-icon name="apps" small />
 					</button>
@@ -41,7 +41,12 @@
 				<p>No photos yet</p>
 			</div>
 
-			<div v-else class="grid" :class="size">
+			<div
+				v-else
+				class="grid"
+				:class="cols ? ['preview', `preview-${cols}`] : size"
+				:style="cols ? { gridTemplateColumns: `repeat(${cols}, 1fr)` } : null"
+			>
 				<div
 					v-for="(item, index) in displayItems"
 					:key="item.key"
@@ -60,13 +65,13 @@
 						class="badge badge--toggle"
 						:class="{ 'is-off': !isHero(item, index) }"
 						:disabled="disabled"
-						:title="item.featured ? 'Featured — click to unset' : 'Make this the big / hero photo'"
+						:title="item.featured ? 'Featured — click to unset' : 'Make this a featured photo'"
 						@click.stop="toggleFeatured(item)"
 					>
 						<v-icon name="star" x-small />
-						Hero
+						Featured
 					</button>
-					<span v-else-if="index === 0" class="badge">Hero</span>
+					<span v-else-if="index === 0" class="badge">Featured</span>
 
 					<button type="button" class="remove" :disabled="disabled" @click.stop="removeItem(item)">
 						<v-icon name="close" small />
@@ -174,6 +179,7 @@ const props = defineProps({
 	limit: { type: [String, Number], default: null },
 	defaultSize: { type: String, default: 'large' },
 	featuredField: { type: String, default: null },
+	previewColumns: { type: [String, Number], default: null },
 });
 
 const emit = defineEmits(['input']);
@@ -184,6 +190,14 @@ const notifications = useNotificationsStore();
 
 const savable = computed(() => props.primaryKey !== null && props.primaryKey !== undefined && props.primaryKey !== '+');
 const featureEnabled = computed(() => !!props.featuredField);
+
+// When set, the grid is locked to this many columns to mirror the final site
+// layout (2 = apartment sections, 3 = villa gallery) and the Small/Large toggle
+// is hidden. Featured cards span the full width at 2 columns, 2×2 above that.
+const cols = computed(() => {
+	const n = Number(props.previewColumns);
+	return Number.isInteger(n) && n >= 2 && n <= 6 ? n : null;
+});
 
 const storageKey = `grdelina-photo-grid-size-${props.collection}-${props.field}`;
 const size = ref(localStorage.getItem(storageKey) || props.defaultSize || 'large');
@@ -667,6 +681,11 @@ function toggleExisting(file) {
 }
 .grid.small {
 	grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+}
+/* previewColumns: grid-template-columns is set inline; featured spans the full
+   width at 2 cols (apartment sections = one big band), 2×2 at 3+ (villa grid). */
+.grid.preview-2 .card.featured {
+	grid-row: auto;
 }
 .card {
 	position: relative;
