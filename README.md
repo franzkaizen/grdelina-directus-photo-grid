@@ -17,13 +17,15 @@ permanent limitation of the built-in interface (not fixable via config).
   title / description / tags. Saving there `PATCH`es `/files/:id` straight
   away (file metadata isn't part of the parent form's staged edits). A button
   in the drawer still links out to Directus's full native file editor.
-- **Featured / "Hero" photos** (opt-in per field via the *Featured flag
-  column* option): each card gets a ★ toggle, and featured photos render
-  **2×2** in the grid. More than one photo can be featured. When no photo is
-  explicitly featured, the first photo shows a static "Hero" badge as a
-  fallback — several fields treat position 0 specially (Hero tiles, a Photo
-  Tour section's large hero). The site uses the same rule: featured photo if
-  any, else the first.
+- **Featured photos** (opt-in per field via the *Featured flag column*
+  option): each card gets a ★ **Featured** toggle. Any number of photos can be
+  featured, at any position. On the site, featured photos render larger — full
+  width in a 2-column apartment section, 2×2 in the 3-column villa grid. When
+  no photo is explicitly featured, the first photo shows a static "Featured"
+  badge as the fallback, and the site treats it the same way.
+- **Preview columns** option: lock the grid to a fixed column count (2 for
+  apartment sections, 3 for the villa gallery) so the editing grid mirrors the
+  final site composition. Hides the Small/Large toggle when set.
 - Upload new files or pick existing ones from the media library, both via
   the same large-thumbnail grid.
 
@@ -88,16 +90,20 @@ it takes two settings, filled in via **Settings → Data Model → (collection)
 | Parent id field | `apartments_id` | `apartment_tour_sections_id` |
 | Max photos | `3` | *(leave empty)* |
 | Featured flag column | *(leave empty)* | `featured` |
+| Preview columns | *(leave empty)* | `2` |
 
 **Featured flag column** is optional. Point it at a `boolean` column on the
 junction table (add one first, `cast-boolean`, default `false`) to enable the
-per-photo ★ toggle and 2×2 rendering. Leave it empty and the feature is off
-(the "Hero" badge is then just a static position-0 label).
+per-photo ★ toggle. Leave it empty and the feature is off (the "Featured" badge
+is then just a static position-0 label).
+
+**Preview columns** is optional. An integer (2–6) that locks the grid to that
+many columns to match the site layout; hides the Small/Large toggle.
 
 Currently wired up for:
 - `apartments.hero_tiles` → `apartments_hero_tiles` / `apartments_id` / limit `3`
-- `apartment_tour_sections.photos` → `apartment_tour_sections_files` / `apartment_tour_sections_id` / featured `featured`
-- `villas.gallery` → `villas_files` / `villas_id` / featured `full_width`
+- `apartment_tour_sections.photos` → `apartment_tour_sections_files` / `apartment_tour_sections_id` / featured `featured` / preview cols `2`
+- `villas.gallery` → `villas_files` / `villas_id` / featured `full_width` / preview cols `3`
 
 (`villas.gallery_featured` — a separate M2M field that used to flag full-width
 villa photos — has been retired; that job is now the ★ toggle on
