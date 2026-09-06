@@ -13,13 +13,17 @@ permanent limitation of the built-in interface (not fixable via config).
   two-state toggle is what shipped and what's been loved for a decade).
 - Drag and drop to reorder.
 - Hover to reveal a remove button.
-- Click a photo to open Directus's native file detail page (title,
-  description, alt text, tags, folder) in a new tab — so you get full
-  metadata editing instead of a bare enlarge-only preview, and never lose
-  your place on the current form underneath.
-- The first photo in the list gets a "Hero" badge, since several of our
-  fields treat position 0 specially (Hero tiles, each Photo Tour section's
-  large hero photo).
+- Click a photo to open a slide-in drawer with a large preview and editable
+  title / description / tags. Saving there `PATCH`es `/files/:id` straight
+  away (file metadata isn't part of the parent form's staged edits). A button
+  in the drawer still links out to Directus's full native file editor.
+- **Featured / "Hero" photos** (opt-in per field via the *Featured flag
+  column* option): each card gets a ★ toggle, and featured photos render
+  **2×2** in the grid. More than one photo can be featured. When no photo is
+  explicitly featured, the first photo shows a static "Hero" badge as a
+  fallback — several fields treat position 0 specially (Hero tiles, a Photo
+  Tour section's large hero). The site uses the same rule: featured photo if
+  any, else the first.
 - Upload new files or pick existing ones from the media library, both via
   the same large-thumbnail grid.
 
@@ -83,12 +87,21 @@ it takes two settings, filled in via **Settings → Data Model → (collection)
 | Junction collection | `apartments_hero_tiles` | `apartment_tour_sections_files` |
 | Parent id field | `apartments_id` | `apartment_tour_sections_id` |
 | Max photos | `3` | *(leave empty)* |
+| Featured flag column | *(leave empty)* | `featured` |
+
+**Featured flag column** is optional. Point it at a `boolean` column on the
+junction table (add one first, `cast-boolean`, default `false`) to enable the
+per-photo ★ toggle and 2×2 rendering. Leave it empty and the feature is off
+(the "Hero" badge is then just a static position-0 label).
 
 Currently wired up for:
 - `apartments.hero_tiles` → `apartments_hero_tiles` / `apartments_id` / limit `3`
-- `apartment_tour_sections.photos` → `apartment_tour_sections_files` / `apartment_tour_sections_id`
-- `villas.gallery` → `villas_files` / `villas_id`
-- `villas.gallery_featured` → `villas_featured_files` / `villas_id`
+- `apartment_tour_sections.photos` → `apartment_tour_sections_files` / `apartment_tour_sections_id` / featured `featured`
+- `villas.gallery` → `villas_files` / `villas_id` / featured `full_width`
+
+(`villas.gallery_featured` — a separate M2M field that used to flag full-width
+villa photos — has been retired; that job is now the ★ toggle on
+`villas.gallery`, stored in `villas_files.full_width`.)
 
 ## Using this field inside a nested item (e.g. Photo Tour Sections)
 
