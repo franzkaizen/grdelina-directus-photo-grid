@@ -23,18 +23,10 @@
 					/>
 				</div>
 				<div class="size-toggle" role="group" aria-label="Card size">
-					<button
-						type="button"
-						:class="{ active: size === 'small' }"
-						@click="setSize('small')"
-					>
+					<button type="button" :class="{ active: size === 'small' }" @click="setSize('small')">
 						<v-icon name="apps" small />
 					</button>
-					<button
-						type="button"
-						:class="{ active: size === 'large' }"
-						@click="setSize('large')"
-					>
+					<button type="button" :class="{ active: size === 'large' }" @click="setSize('large')">
 						<v-icon name="grid_view" small />
 					</button>
 				</div>
@@ -60,9 +52,22 @@
 					@dragenter.prevent="onDragEnter(index)"
 					@drop.prevent="onDrop"
 					@dragend="onDragEnd"
-					:class="{ dragging: dragIndex === index, over: overIndex === index }"
+					:class="{ dragging: dragIndex === index, over: overIndex === index, featured: item.featured }"
 				>
-					<span v-if="index === 0" class="badge">Hero</span>
+					<button
+						v-if="featureEnabled"
+						type="button"
+						class="badge badge--toggle"
+						:class="{ 'is-off': !isHero(item, index) }"
+						:disabled="disabled"
+						:title="item.featured ? 'Featured — click to unset' : 'Make this the big / hero photo'"
+						@click.stop="toggleFeatured(item)"
+					>
+						<v-icon name="star" x-small />
+						Hero
+					</button>
+					<span v-else-if="index === 0" class="badge">Hero</span>
+
 					<button type="button" class="remove" :disabled="disabled" @click.stop="removeItem(item)">
 						<v-icon name="close" small />
 					</button>
@@ -70,7 +75,7 @@
 						:src="thumbUrl(item.file, size === 'large' ? 480 : 200)"
 						:alt="item.file?.filename_download || ''"
 						loading="lazy"
-						@click="openFileDetail(item.file)"
+						@click="openFileDrawer(item.file)"
 					/>
 				</div>
 			</div>
@@ -120,6 +125,37 @@
 				</v-button>
 			</div>
 		</v-drawer>
+
+		<v-drawer
+			:model-value="showFileDrawer"
+			:title="drawerFile?.filename_download || 'Photo'"
+			icon="image"
+			@cancel="showFileDrawer = false"
+		>
+			<template #actions>
+				<v-button v-tooltip.bottom="'Open full file editor'" icon rounded secondary :href="fileAdminUrl">
+					<v-icon name="open_in_new" />
+				</v-button>
+				<v-button v-tooltip.bottom="'Save'" icon rounded :loading="drawerSaving" @click="saveDrawer">
+					<v-icon name="check" />
+				</v-button>
+			</template>
+			<div v-if="drawerFile" class="file-drawer">
+				<img :src="thumbUrl(drawerFile, 1400)" :alt="drawerForm.title || drawerFile.filename_download || ''" />
+				<div class="field">
+					<p class="field-label">Title</p>
+					<v-input v-model="drawerForm.title" placeholder="Title" />
+				</div>
+				<div class="field">
+					<p class="field-label">Description <span class="hint">(used as alt text)</span></p>
+					<v-textarea v-model="drawerForm.description" :rows="3" placeholder="Describe what's in the photo" />
+				</div>
+				<div class="field">
+					<p class="field-label">Tags <span class="hint">(comma-separated)</span></p>
+					<v-input v-model="drawerForm.tags" placeholder="e.g. exterior, sea view" />
+				</div>
+			</div>
+		</v-drawer>
 	</div>
 </template>
 
@@ -137,6 +173,7 @@ const props = defineProps({
 	parentField: { type: String, default: null },
 	limit: { type: [String, Number], default: null },
 	defaultSize: { type: String, default: 'large' },
+	featuredField: { type: String, default: null },
 });
 
 const emit = defineEmits(['input']);
@@ -146,6 +183,7 @@ const { useNotificationsStore } = useStores();
 const notifications = useNotificationsStore();
 
 const savable = computed(() => props.primaryKey !== null && props.primaryKey !== undefined && props.primaryKey !== '+');
+const featureEnabled = computed(() => !!props.featuredField);
 
 const storageKey = `grdelina-photo-grid-size-${props.collection}-${props.field}`;
 const size = ref(localStorage.getItem(storageKey) || props.defaultSize || 'large');
@@ -161,19 +199,16 @@ function setSize(next) {
 const FILE_FIELDS = 'id,filename_download,type,width,height,modified_on';
 
 // ---- Staged editing --------------------------------------------------------
-// Normal Directus behaviour: nothing touches the junction until the parent
-// item's own Save button is clicked, and everything here is discardable by
-// navigating away instead, same as every other field. We keep local
-// create/update/delete lists and hand them to Directus as its own documented
+// Nothing touches the junction until the parent item's own Save is clicked;
+// everything here is discardable by navigating away, same as every other field.
+// We keep local create/update/delete state and hand Directus its own documented
 // nested-relational payload shape ({ create, update, delete }) via
-// emit('input', ...) -- Directus's own save logic applies that against the
-// junction when the parent item is saved. New file *uploads* are the one
-// exception: the binary has to exist as a directus_files row immediately,
-// same as native Directus's own Files field -- only the *link* to this
-// parent is staged, not the upload itself.
-const savedItems = ref([]); // committed junction rows already on the server: {id, sort, file}
-const pendingCreate = ref([]); // [{ _key, file, sort }] -- not yet linked
+// emit('input', ...). New file *uploads* are the one exception: the binary has
+// to exist as a directus_files row immediately -- only the *link* is staged.
+const savedItems = ref([]); // committed junction rows: {id, sort, featured, file}
+const pendingCreate = ref([]); // [{ _key, file, sort, featured }]
 const pendingUpdate = ref({}); // { [savedItemId]: newSort }
+const pendingFeatured = ref({}); // { [savedItemId]: boolean }
 const pendingDelete = ref(new Set()); // Set<savedItemId>
 const loading = ref(false);
 
@@ -186,6 +221,7 @@ const displayItems = computed(() => {
 			isNew: false,
 			file: i.file,
 			sort: pendingUpdate.value[i.id] ?? i.sort,
+			featured: pendingFeatured.value[i.id] ?? i.featured ?? false,
 		}));
 	const created = pendingCreate.value.map((c) => ({
 		key: c._key,
@@ -194,9 +230,19 @@ const displayItems = computed(() => {
 		_key: c._key,
 		file: c.file,
 		sort: c.sort,
+		featured: !!c.featured,
 	}));
 	return [...kept, ...created].sort((a, b) => a.sort - b.sort);
 });
+
+const anyFeatured = computed(() => displayItems.value.some((i) => i.featured));
+
+// The card that visually reads as the hero: an explicitly-featured one, or --
+// mirroring the site's fallback -- the first photo when nothing is featured.
+function isHero(item, index) {
+	if (item.featured) return true;
+	return !anyFeatured.value && index === 0;
+}
 
 const limitNum = computed(() => (props.limit ? Number(props.limit) : null));
 const limitReached = computed(() => limitNum.value !== null && displayItems.value.length >= limitNum.value);
@@ -207,9 +253,26 @@ function nextSort() {
 }
 
 function emitPending() {
-	const create = pendingCreate.value.map((c) => ({ directus_files_id: c.file.id, sort: c.sort }));
-	const update = Object.entries(pendingUpdate.value).map(([id, sort]) => ({ id: Number(id), sort }));
+	const ff = props.featuredField;
+	const create = pendingCreate.value.map((c) => {
+		const row = { directus_files_id: c.file.id, sort: c.sort };
+		if (ff) row[ff] = !!c.featured;
+		return row;
+	});
+
+	// Merge sort + featured changes per saved row id.
+	const changed = {};
+	for (const [id, sort] of Object.entries(pendingUpdate.value)) {
+		(changed[id] ||= { id: Number(id) }).sort = sort;
+	}
+	if (ff) {
+		for (const [id, featured] of Object.entries(pendingFeatured.value)) {
+			(changed[id] ||= { id: Number(id) })[ff] = !!featured;
+		}
+	}
+	const update = Object.values(changed);
 	const del = [...pendingDelete.value];
+
 	if (create.length === 0 && update.length === 0 && del.length === 0) {
 		emit('input', null);
 	} else {
@@ -220,6 +283,7 @@ function emitPending() {
 function resetPending() {
 	pendingCreate.value = [];
 	pendingUpdate.value = {};
+	pendingFeatured.value = {};
 	pendingDelete.value = new Set();
 }
 
@@ -227,10 +291,12 @@ async function fetchSavedItems() {
 	if (!savable.value) return;
 	loading.value = true;
 	try {
+		const fields = ['id', 'sort', `directus_files_id.${FILE_FIELDS.replace(/,/g, ',directus_files_id.')}`];
+		if (props.featuredField) fields.push(props.featuredField);
 		const res = await api.get(`/items/${props.junctionCollection}`, {
 			params: {
 				filter: JSON.stringify({ [props.parentField]: { _eq: props.primaryKey } }),
-				fields: ['id', 'sort', `directus_files_id.${FILE_FIELDS.replace(/,/g, ',directus_files_id.')}`].join(','),
+				fields: fields.join(','),
 				sort: 'sort',
 				limit: -1,
 			},
@@ -238,6 +304,7 @@ async function fetchSavedItems() {
 		savedItems.value = (res.data.data || []).map((row) => ({
 			id: row.id,
 			sort: row.sort,
+			featured: props.featuredField ? !!row[props.featuredField] : false,
 			file: row.directus_files_id,
 		}));
 	} catch (err) {
@@ -247,15 +314,17 @@ async function fetchSavedItems() {
 	}
 }
 
-// Recover in-progress edits if this component ever remounts before Save (e.g.
-// switching tabs within the same item form) -- Directus hands back exactly
-// what we last emitted as `value`.
+// Recover in-progress edits if this component remounts before Save (tab switch
+// within the same item form) -- Directus hands back what we last emitted.
 async function restorePendingFromValue() {
 	const v = props.value;
 	if (!v || typeof v !== 'object' || Array.isArray(v)) return;
+	const ff = props.featuredField;
 	pendingUpdate.value = {};
+	pendingFeatured.value = {};
 	(v.update || []).forEach((u) => {
-		pendingUpdate.value[u.id] = u.sort;
+		if (typeof u.sort === 'number') pendingUpdate.value[u.id] = u.sort;
+		if (ff && u[ff] !== undefined) pendingFeatured.value[u.id] = !!u[ff];
 	});
 	pendingDelete.value = new Set(v.delete || []);
 	const creates = v.create || [];
@@ -273,6 +342,7 @@ async function restorePendingFromValue() {
 			_key: `new-${c.directus_files_id}`,
 			file: byId[c.directus_files_id] || { id: c.directus_files_id },
 			sort: c.sort,
+			featured: ff ? !!c[ff] : false,
 		}));
 	} catch (err) {
 		pendingCreate.value = [];
@@ -296,9 +366,51 @@ function thumbUrl(file, width) {
 	return `/assets/${file.id}?width=${width}`;
 }
 
-function openFileDetail(file) {
+// ---- file drawer (edit metadata in place, no tab switch) ------------------
+const showFileDrawer = ref(false);
+const drawerFile = ref(null);
+const drawerSaving = ref(false);
+const drawerForm = ref({ title: '', description: '', tags: '' });
+const fileAdminUrl = computed(() =>
+	drawerFile.value?.id ? `${window.location.origin}/admin/files/${drawerFile.value.id}` : '',
+);
+
+async function openFileDrawer(file) {
 	if (!file?.id) return;
-	window.open(`${window.location.origin}/admin/files/${file.id}`, '_blank');
+	drawerFile.value = file;
+	drawerForm.value = { title: '', description: '', tags: '' };
+	showFileDrawer.value = true;
+	try {
+		const res = await api.get(`/files/${file.id}`, { params: { fields: 'title,description,tags' } });
+		const d = res.data.data || {};
+		drawerForm.value = {
+			title: d.title || '',
+			description: d.description || '',
+			tags: Array.isArray(d.tags) ? d.tags.join(', ') : d.tags || '',
+		};
+	} catch (err) {
+		notifications.add({ title: 'Could not load file details', type: 'error' });
+	}
+}
+
+async function saveDrawer() {
+	if (!drawerFile.value?.id) return;
+	drawerSaving.value = true;
+	try {
+		await api.patch(`/files/${drawerFile.value.id}`, {
+			title: drawerForm.value.title || null,
+			description: drawerForm.value.description || null,
+			tags: drawerForm.value.tags
+				? drawerForm.value.tags.split(',').map((t) => t.trim()).filter(Boolean)
+				: null,
+		});
+		notifications.add({ title: 'Photo details saved' });
+		showFileDrawer.value = false;
+	} catch (err) {
+		notifications.add({ title: 'Could not save', type: 'error' });
+	} finally {
+		drawerSaving.value = false;
+	}
 }
 
 const fileInput = ref(null);
@@ -326,7 +438,10 @@ async function uploadAndStage(file) {
 
 function stageCreate(file) {
 	if (limitReached.value) return;
-	pendingCreate.value = [...pendingCreate.value, { _key: `new-${file.id}-${Date.now()}`, file, sort: nextSort() }];
+	pendingCreate.value = [
+		...pendingCreate.value,
+		{ _key: `new-${file.id}-${Date.now()}`, file, sort: nextSort(), featured: false },
+	];
 	emitPending();
 }
 
@@ -336,6 +451,19 @@ function removeItem(item) {
 		pendingCreate.value = pendingCreate.value.filter((c) => c._key !== item._key);
 	} else {
 		pendingDelete.value = new Set([...pendingDelete.value, item.id]);
+	}
+	emitPending();
+}
+
+function toggleFeatured(item) {
+	if (props.disabled || !props.featuredField) return;
+	if (item.isNew) {
+		const c = pendingCreate.value.find((x) => x._key === item._key);
+		if (c) c.featured = !c.featured;
+		pendingCreate.value = [...pendingCreate.value];
+	} else {
+		const current = pendingFeatured.value[item.id] ?? item.featured ?? false;
+		pendingFeatured.value = { ...pendingFeatured.value, [item.id]: !current };
 	}
 	emitPending();
 }
@@ -532,6 +660,7 @@ function toggleExisting(file) {
 .grid {
 	display: grid;
 	gap: 8px;
+	grid-auto-flow: dense;
 }
 .grid.large {
 	grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -546,6 +675,10 @@ function toggleExisting(file) {
 	overflow: hidden;
 	background: var(--theme--background-subdued);
 	cursor: grab;
+}
+.card.featured {
+	grid-column: span 2;
+	grid-row: span 2;
 }
 .card.dragging {
 	opacity: 0.4;
@@ -565,12 +698,27 @@ function toggleExisting(file) {
 	top: 6px;
 	left: 6px;
 	z-index: 2;
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
 	background: var(--theme--primary);
 	color: var(--white);
 	font-size: 11px;
 	line-height: 1;
 	padding: 4px 8px;
 	border-radius: 999px;
+}
+.card .badge--toggle {
+	cursor: pointer;
+	border: none;
+}
+.card .badge--toggle.is-off {
+	background: rgb(0 0 0 / 0.45);
+	opacity: 0;
+	transition: opacity var(--fast, 150ms);
+}
+.card:hover .badge--toggle.is-off {
+	opacity: 1;
 }
 .card .remove {
 	position: absolute;
@@ -590,6 +738,27 @@ function toggleExisting(file) {
 }
 .card:hover .remove {
 	opacity: 1;
+}
+.file-drawer {
+	padding: 20px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+.file-drawer img {
+	width: 100%;
+	max-height: 55vh;
+	object-fit: contain;
+	border-radius: var(--theme--border-radius);
+	background: var(--theme--background-subdued);
+}
+.file-drawer .field-label {
+	font-size: 13px;
+	margin-bottom: 4px;
+	color: var(--theme--foreground-subdued);
+}
+.file-drawer .hint {
+	opacity: 0.7;
 }
 .picker {
 	padding: 20px;

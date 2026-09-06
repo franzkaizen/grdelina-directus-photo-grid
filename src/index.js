@@ -4,7 +4,8 @@ export default {
 	id: 'grdelina-photo-grid',
 	name: 'Photo Grid',
 	icon: 'grid_view',
-	description: 'Large-thumbnail photo grid for M2M-to-files fields, with a Small/Large size toggle, drag reorder, and click to open a photo\'s native detail page.',
+	description:
+		'Large-thumbnail photo grid for M2M-to-files fields: Small/Large size toggle, drag reorder, an optional per-photo "featured" flag (featured photos show 2×2), and click a photo to edit its title/description/tags in a slide-in drawer.',
 	component: InterfaceComponent,
 	types: ['alias'],
 	localTypes: ['files'],
@@ -57,6 +58,16 @@ export default {
 						{ text: 'Large', value: 'large' },
 					],
 				},
+			},
+		},
+		{
+			field: 'featuredField',
+			name: 'Featured flag column',
+			type: 'string',
+			meta: {
+				interface: 'input',
+				width: 'half',
+				note: 'Optional. A boolean column on the junction that marks a photo as the big / hero one (e.g. `featured`, `full_width`). Set it to show a per-photo toggle and render featured photos 2×2. Leave empty to disable.',
 			},
 		},
 	],
